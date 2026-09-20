@@ -1,6 +1,6 @@
-#Test 1: JSON Datenspeicherung
 import json
 
+#Test 1: JSON Datenspeicherung
 daten = {
     "studiengang": "Medizinische Informatik",
     "ziel_abschluss": "17.11.2028",
