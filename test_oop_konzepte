@@ -1,0 +1,87 @@
+from dataclasses import dataclass, field
+from datetime import date
+from typing import Optional
+from enum import Enum
+
+@dataclass
+class Modul: 
+    name: str
+    ects: int
+    leistungsnachweis: Optional[object] = None
+
+    @property
+    def status(self): 
+        if self.leistungsnachweis is None:
+            return "OFFEN"
+        elif isinstance(self.leistungsnachweis, Pruefungsleistung):
+            return "BESTANDEN"
+        else:
+            return "ANERKANNT"
+
+@dataclass
+class Studiengang: 
+    name: str
+    semester: list = field(default_factory=list)
+
+@dataclass  
+class Leistungsnachweis: 
+    datum: date
+
+class Pruefungsart(Enum):
+    KLAUSUR = "KLAUSUR"
+    HAUSARBEIT = "HAUSARBEIT"
+    PORTFOLIO = "PORTFOLIO"
+    PROJEKTARBEIT = "PROJEKTARBEIT"
+
+@dataclass
+class Pruefungsleistung(Leistungsnachweis): 
+    note: float
+    pruefungs_art: Pruefungsart
+
+@dataclass
+class Anerkennung(Leistungsnachweis):
+    leistung: str
+    leistung_institution: str
+
+
+
+
+
+# Test Modul
+m = Modul(name="Python", ects=5)
+print(m)
+print(m.name)
+print(m.ects)
+
+# Test Studiengang
+sg1 = Studiengang(name="Medizinische Informatik")
+
+sg1.semester.append("Semester 1")
+print(sg1.semester)
+
+# Test Pruefungsleistung
+p1 = Pruefungsleistung(
+    datum=date(2026, 12, 17),
+    note=1.0, 
+    pruefungs_art=Pruefungsart.KLAUSUR
+)
+print(p1)
+print(p1.datum)
+print(p1.note)
+print(p1.pruefungs_art)  
+
+# Test Anerkennung/Bestanden
+m1 = Modul(name="Python", ects=5)
+print(m1.status) # OFFEN
+
+m2 = Modul(name="E-Health", ects=5, leistungsnachweis=p1)
+print(m2.status) # BESTANDEN
+
+# Test Anerkennung
+a1 = Anerkennung(
+    datum=date(2024, 10, 17),
+    leistung="Medizinische Grundlagen für Informatiker",
+    leistung_institution="Ludwig-Maximilians-Universität München"
+)
+m3 = Modul(name="Medizinische Grundlagen für Informatiker", ects=5, leistungsnachweis=a1)
+print(m3.status)  # ANERKANNT
