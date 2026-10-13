@@ -1,87 +1,344 @@
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import date
-from typing import Optional
+from datetime import date, timedelta
 from enum import Enum
+from typing import Optional
 
-@dataclass
-class Modul: 
-    name: str
-    ects: int
-    leistungsnachweis: Optional[object] = None
 
-    @property
-    def status(self): 
-        if self.leistungsnachweis is None:
-            return "OFFEN"
-        elif isinstance(self.leistungsnachweis, Pruefungsleistung):
-            return "BESTANDEN"
-        else:
-            return "ANERKANNT"
-
-@dataclass
-class Studiengang: 
-    name: str
-    semester: list = field(default_factory=list)
-
-@dataclass  
-class Leistungsnachweis: 
-    datum: date
+# ============================================================
+# Enums
+# ============================================================
 
 class Pruefungsart(Enum):
-    KLAUSUR = "KLAUSUR"
-    HAUSARBEIT = "HAUSARBEIT"
-    PORTFOLIO = "PORTFOLIO"
+    """Mögliche Prüfungsformate eines Moduls."""
+    KLAUSUR      = "KLAUSUR"
+    HAUSARBEIT   = "HAUSARBEIT"
+    PORTFOLIO    = "PORTFOLIO"
     PROJEKTARBEIT = "PROJEKTARBEIT"
 
+
+class Status(Enum):
+    """Bearbeitungsstatus eines Moduls."""
+    OFFEN     = "OFFEN"
+    BESTANDEN = "BESTANDEN"
+    ANERKANNT = "ANERKANNT"
+
+
+# ============================================================
+# Domain-Schicht
+# ============================================================
+
 @dataclass
-class Pruefungsleistung(Leistungsnachweis): 
+class Leistungsnachweis(ABC):
+    """Abstrakte Basisklasse für alle Leistungsnachweise.
+
+    Jede Unterklasse implementiert beitrag_status() eigenständig.
+    Dadurch ist Modul.status offen für Erweiterungen, ohne selbst
+    geändert zu werden (OCP, DIP).
+    """
+    datum: date
+
+    @property
+    @abstractmethod
+    def beitrag_status(self) -> Status:
+        """Gibt den Status zurück, den dieser Nachweis zum Modul beiträgt."""
+        ...
+
+
+@dataclass
+class Pruefungsleistung(Leistungsnachweis):
+    """Bestandene oder nicht bestandene Prüfungsleistung (z. B. Klausur)."""
     note: float
     pruefungs_art: Pruefungsart
 
+    @property
+    def beitrag_status(self) -> Status:
+        return Status.BESTANDEN if self.note <= 4.0 else Status.OFFEN
+
+
 @dataclass
 class Anerkennung(Leistungsnachweis):
+    """Anerkannte externe Leistung einer anderen Hochschule."""
     leistung: str
     leistung_institution: str
 
+    @property
+    def beitrag_status(self) -> Status:
+        return Status.ANERKANNT
 
 
+@dataclass
+class Modul:
+    """Fachliches Objekt: repräsentiert ein Studienmodul.
+
+    status delegiert an Leistungsnachweis.beitrag_status() –
+    kein isinstance-Check notwendig (OCP, DIP).
+    """
+    name: str
+    ects: int
+    leistungsnachweis: Optional[Leistungsnachweis] = None
+
+    @property
+    def status(self) -> Status:
+        if self.leistungsnachweis is None:
+            return Status.OFFEN
+        return self.leistungsnachweis.beitrag_status
 
 
-# Test Modul
-m = Modul(name="Python", ects=5)
-print(m)
-print(m.name)
-print(m.ects)
+@dataclass
+class Semester:
+    """Fachliches Objekt: gruppiert Module eines Semesters."""
+    nummer: int
+    module: list = field(default_factory=list)
 
-# Test Studiengang
-sg1 = Studiengang(name="Medizinische Informatik")
 
-sg1.semester.append("Semester 1")
-print(sg1.semester)
+@dataclass
+class Studiengang:
+    """Fachliches Objekt: repräsentiert einen vollständigen Studiengang."""
+    name: str
+    zielstudiendatum: date
+    immatrikulationsdatum: date
+    zielnote: float
+    semester: list = field(default_factory=list)
 
-# Test Pruefungsleistung
-p1 = Pruefungsleistung(
-    datum=date(2026, 12, 17),
-    note=1.0, 
-    pruefungs_art=Pruefungsart.KLAUSUR
-)
-print(p1)
-print(p1.datum)
-print(p1.note)
-print(p1.pruefungs_art)  
 
-# Test Anerkennung/Bestanden
-m1 = Modul(name="Python", ects=5)
-print(m1.status) # OFFEN
+@dataclass
+class Studienfortschritt:
+    """Reine Datenklasse: wird von den Service-Klassen befüllt.
 
-m2 = Modul(name="E-Health", ects=5, leistungsnachweis=p1)
-print(m2.status) # BESTANDEN
+    Enthält keine eigene Berechnungslogik (SRP).
+    """
+    errechnete_ects: int = 0
+    errechnete_note: float = 0.0
+    errechnete_studiendatum: Optional[date] = None
 
-# Test Anerkennung
-a1 = Anerkennung(
-    datum=date(2024, 10, 17),
-    leistung="Medizinische Grundlagen für Informatiker",
-    leistung_institution="Ludwig-Maximilians-Universität München"
-)
-m3 = Modul(name="Medizinische Grundlagen für Informatiker", ects=5, leistungsnachweis=a1)
-print(m3.status)  # ANERKANNT
+
+# ============================================================
+# DTO
+# ============================================================
+
+@dataclass
+class DashboardDatenDTO:
+    """Data Transfer Object: transportiert vorbereitete Daten
+    strukturiert vom Controller zur View (kein allgemeines dict)."""
+    studiengang: Studiengang
+    fortschritt: Studienfortschritt
+
+
+# ============================================================
+# Repository-Schicht
+# ============================================================
+
+class StudiengangRepository(ABC):
+    """Abstrakte Schnittstelle für alle Repository-Implementierungen.
+
+    Der Controller hängt nur von dieser Abstraktion ab, nicht von
+    konkreten Speichertechniken (DIP).
+    """
+
+    @abstractmethod
+    def laden(self) -> Studiengang:
+        """Lädt den Studiengang aus der Datenquelle."""
+        ...
+
+    @abstractmethod
+    def speichern(self, studiengang: Studiengang) -> None:
+        """Speichert den Studiengang in der Datenquelle."""
+        ...
+
+
+class InMemoryStudiengangRepository(StudiengangRepository):
+    """Konkretes Repository mit Testdaten (Phase-2-Dummy).
+
+    In Phase 3 austauschbar durch JsonStudiengangRepository
+    oder SQLiteStudiengangRepository – der Controller bleibt unverändert.
+    """
+
+    def laden(self) -> Studiengang:
+        p1 = Pruefungsleistung(
+            datum=date(2025, 3, 15),
+            note=1.7,
+            pruefungs_art=Pruefungsart.KLAUSUR,
+        )
+        p2 = Pruefungsleistung(
+            datum=date(2025, 6, 20),
+            note=2.3,
+            pruefungs_art=Pruefungsart.PORTFOLIO,
+        )
+        p3 = Pruefungsleistung(
+            datum=date(2025, 6, 20),
+            note=5.0,
+            pruefungs_art=Pruefungsart.KLAUSUR,
+        )
+        a1 = Anerkennung(
+            datum=date(2024, 10, 1),
+            leistung="Medizinische Grundlagen für Informatiker",
+            leistung_institution="Ludwig-Maximilians-Universität München",
+        )
+
+        m1 = Modul(name="Python",                  ects=5, leistungsnachweis=p1)
+        m2 = Modul(name="E-Health",                ects=5, leistungsnachweis=p2)
+        m3 = Modul(name="Medizinische Grundlagen", ects=5, leistungsnachweis=a1)
+        m4 = Modul(name="Mathematik",              ects=5)
+        m5 = Modul(name="Statistik",               ects=5, leistungsnachweis=p3)
+
+        sem1 = Semester(nummer=1)
+        sem1.module.extend([m1, m2])
+        sem2 = Semester(nummer=2)
+        sem2.module.extend([m3, m4, m5])
+
+        sg = Studiengang(
+            name="Medizinische Informatik",
+            zielstudiendatum=date(2027, 9, 30),
+            immatrikulationsdatum=date(2024, 10, 1),
+            zielnote=2.0,
+        )
+        sg.semester.extend([sem1, sem2])
+        return sg
+
+    def speichern(self, studiengang: Studiengang) -> None:
+        pass  # Phase 3: JSON- oder SQLite-Implementierung
+
+
+# ============================================================
+# Service-Schicht
+# ============================================================
+
+class NotenService:
+    """Berechnet notenbasierte Kennzahlen über mehrere Domain-Objekte (SRP)."""
+
+    def berechne_note(self, studiengang: Studiengang) -> float:
+        """Berechnet den Notendurchschnitt aller bestandenen Prüfungsleistungen."""
+        noten = [
+            modul.leistungsnachweis.note
+            for sem in studiengang.semester
+            for modul in sem.module
+            if modul.status == Status.BESTANDEN
+            and isinstance(modul.leistungsnachweis, Pruefungsleistung)
+        ]
+        return round(sum(noten) / len(noten), 2) if noten else 0.0
+
+
+class FortschrittService:
+    """Berechnet Fortschrittskennzahlen über mehrere Domain-Objekte (SRP)."""
+
+    def berechne_ects(self, studiengang: Studiengang) -> int:
+        """Summiert alle bestandenen oder anerkannten ECTS."""
+        return sum(
+            modul.ects
+            for sem in studiengang.semester
+            for modul in sem.module
+            if modul.status in (Status.BESTANDEN, Status.ANERKANNT)
+        )
+
+    def berechne_abschlussdatum(self, studiengang: Studiengang) -> date:
+        """Schätzt das Abschlussdatum anhand des bisherigen Lerntempos."""
+        gesamt_ects = sum(
+            modul.ects
+            for sem in studiengang.semester
+            for modul in sem.module
+        )
+        errechnete_ects = self.berechne_ects(studiengang)
+
+        if gesamt_ects == 0 or errechnete_ects <= 0:
+            return studiengang.zielstudiendatum
+        if errechnete_ects >= gesamt_ects:
+            return date.today()
+
+        fortschritt = errechnete_ects / gesamt_ects
+        tage_bisher = (date.today() - studiengang.immatrikulationsdatum).days
+        geschaetzte_gesamtdauer = int(tage_bisher / fortschritt)
+        return studiengang.immatrikulationsdatum + timedelta(days=geschaetzte_gesamtdauer)
+
+
+# ============================================================
+# Controller-Schicht
+# ============================================================
+
+class DashboardController:
+    """Koordiniert Repository und Services; bereitet Daten für die View vor.
+
+    Hängt nur von der abstrakten Schnittstelle StudiengangRepository ab –
+    die konkrete Implementierung wird von außen injiziert (DIP).
+    """
+
+    def __init__(
+        self,
+        repository: StudiengangRepository,
+        noten_service: NotenService,
+        fortschritt_service: FortschrittService,
+    ) -> None:
+        self.repository = repository
+        self.noten_service = noten_service
+        self.fortschritt_service = fortschritt_service
+
+    def lade_daten(self) -> DashboardDatenDTO:
+        """Lädt den Studiengang und berechnet den Studienfortschritt."""
+        studiengang = self.repository.laden()
+        fortschritt = Studienfortschritt(
+            errechnete_ects=self.fortschritt_service.berechne_ects(studiengang),
+            errechnete_note=self.noten_service.berechne_note(studiengang),
+            errechnete_studiendatum=self.fortschritt_service.berechne_abschlussdatum(
+                studiengang
+            ),
+        )
+        return DashboardDatenDTO(studiengang=studiengang, fortschritt=fortschritt)
+
+
+# ============================================================
+# View-Schicht
+# ============================================================
+
+class DashboardView:
+    """Ausschließlich für die Darstellung zuständig – keine fachliche Logik (SRP)."""
+
+    def zeige_dashboard(self, daten: DashboardDatenDTO) -> None:
+        """Gibt das Dashboard strukturiert auf der Konsole aus."""
+        sg = daten.studiengang
+        sf = daten.fortschritt
+
+        print("=" * 52)
+        print(f"  Dashboard: {sg.name}")
+        print("=" * 52)
+        print(f"  Erreichte ECTS        : {sf.errechnete_ects}")
+        print(f"  Notendurchschnitt     : {sf.errechnete_note}")
+        print(f"  Gesch. Abschlussdatum : {sf.errechnete_studiendatum}")
+        print(f"  Ziel-Abschlussdatum   : {sg.zielstudiendatum}")
+        print(f"  Zielnote              : {sg.zielnote}")
+        print()
+        print("  Module:")
+        for sem in sg.semester:
+            print(f"    Semester {sem.nummer}:")
+            for modul in sem.module:
+                print(
+                    f"      - {modul.name:<28} "
+                    f"{modul.ects} ECTS  [{modul.status.value}]"
+                )
+        print("=" * 52)
+
+
+# ============================================================
+# Application-Schicht (Composition Root)
+# ============================================================
+
+class DashboardApp:
+    """Startpunkt der Anwendung: erzeugt und verbindet alle Schichten."""
+
+    def start(self) -> None:
+        """Verdrahtet alle Komponenten und startet das Dashboard."""
+        repository          = InMemoryStudiengangRepository()
+        noten_service       = NotenService()
+        fortschritt_service = FortschrittService()
+        controller          = DashboardController(
+            repository, noten_service, fortschritt_service
+        )
+        view = DashboardView()
+
+        daten = controller.lade_daten()
+        view.zeige_dashboard(daten)
+
+
+if __name__ == "__main__":
+    DashboardApp().start()
