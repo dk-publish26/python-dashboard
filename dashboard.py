@@ -382,7 +382,7 @@ class JsonStudiengangRepository(StudiengangRepository):
         Args:
             d: Ein Dictionary, das das Modul repräsentiert.
         Returns:
-            Modul: Ein Modul mit seinem Leistungsnachweis (Anerkennung/Prüfungsleistung)
+            Modul: Ein Modul mit seinem Leistungsnachweis (Anerkennung/Prüfungsleistung).
         """
         ln = (
             self._dict_zu_leistungsnachweis(d["leistungsnachweis"])
